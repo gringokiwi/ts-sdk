@@ -151,7 +151,7 @@ import {
     type ServerInfoSource,
 } from "./arkInfoSnapshot";
 import { Batch } from "./batch";
-import { Estimator } from "../arkfee";
+import { batchFeeConfig, Estimator } from "../arkfee";
 import { DelegateProvider } from "../providers/delegate";
 import { buildTransactionHistory } from "../utils/transactionHistory";
 import { createDefaultActivityRegistry, buildActivities, type Activity } from "./activity";
@@ -3751,7 +3751,7 @@ export class Wallet
         // and send all to the offchain address
         if (!params) {
             const { fees, vtxoMaxAmount } = await this.arkProvider.getInfo();
-            const estimator = new Estimator(fees.intentFee);
+            const estimator = new Estimator(batchFeeConfig(fees));
 
             let amount = 0;
 
