@@ -2518,7 +2518,7 @@ export class Wallet
 
     protected override intentReconciliationConfig(): ContractManagerConfig["intentReconciliation"] {
         return {
-            deleteIntent: (intent) => this.arkProvider.deleteIntent(intent),
+            deleteIntent: (intent) => this.arkProvider.deleteBatchRegistration(intent),
             isOutpointInFlight: (o) => this._settlingOutpoints.has(`${o.txid}:${o.vout}`),
         };
     }
@@ -3949,13 +3949,13 @@ export class Wallet
         }
 
         const [intent, deleteIntent] = await Promise.all([
-            this.makeRegisterIntentSignature(
+            this.makeBatchRegistrationProof(
                 params.inputs,
                 outputs,
                 onchainOutputIndexes,
                 signingPublicKeys,
             ),
-            this.makeDeleteIntentSignature(params.inputs),
+            this.makeDeleteBatchRegistrationProof(params.inputs),
         ]);
 
         // Client-side key: the proof's txid (NArk parity).
@@ -4022,7 +4022,7 @@ export class Wallet
             stream = this.arkProvider.getEventStream(abortController.signal, topics);
 
             // Prime the iterator so the provider opens the SSE subscription
-            // before safeRegisterIntent can trigger server-side batch events.
+            // before safeCreateBatchRegistration can trigger server-side batch events.
             const firstNext = stream.next();
             // If settle exits before Batch.join consumes the primed result,
             // keep the orphaned promise from surfacing as an unhandled rejection.
@@ -4037,7 +4037,7 @@ export class Wallet
 
             registering = true;
             onRegistrationAttempt?.();
-            const intentId = await this.safeRegisterIntent(intent, params.inputs);
+            const intentId = await this.safeCreateBatchRegistration(intent, params.inputs);
 
             await this.persistIntentSnapshot(
                 intentTxId,
@@ -4092,13 +4092,13 @@ export class Wallet
             let released = !registering;
             if (registering) {
                 try {
-                    await this.arkProvider.deleteIntent(deleteIntent);
+                    await this.arkProvider.deleteBatchRegistration(deleteIntent);
                     released = true;
                 } catch (e) {
                     if (isNoMatchingIntentsError(e)) released = true;
                     else {
                         console.warn(
-                            `Failed to delete intent after settle failure for inputs [${inputIds}]; intent may linger on server and cause 'duplicated input' on next settle`,
+                            `Failed to delete batch registration after settle failure for inputs [${inputIds}]; intent may linger on server and cause 'duplicated input' on next settle`,
                             e,
                         );
                     }
@@ -4349,7 +4349,7 @@ export class Wallet
                 const intentIdHashStr = hex.encode(intentIdHash);
 
                 // check if our intent ID hash matches any in the event
-                const skip = !event.intentIdHashes.includes(intentIdHashStr);
+                const skip = !event.registrationIdHashes.includes(intentIdHashStr);
 
                 if (skip) {
                     return { skip };
@@ -4549,12 +4549,12 @@ export class Wallet
         return signed as Transaction;
     }
 
-    async safeRegisterIntent(
+    async safeCreateBatchRegistration(
         intent: SignedIntent<Intent.RegisterMessage>,
         inputs: ExtendedCoin[],
     ): Promise<string> {
         try {
-            return await this.arkProvider.registerIntent(intent);
+            return await this.arkProvider.createBatchRegistration(intent);
         } catch (error) {
             // catch the "already registered by another intent" error
             if (
@@ -4564,18 +4564,18 @@ export class Wallet
             ) {
                 // Delete over the caller's own inputs, not getVtxos(): boarding UTXOs are the
                 // most common "duplicated input" trigger and getVtxos() misses them.
-                const deleteIntent = await this.makeDeleteIntentSignature(inputs);
-                await this.arkProvider.deleteIntent(deleteIntent);
+                const deleteIntent = await this.makeDeleteBatchRegistrationProof(inputs);
+                await this.arkProvider.deleteBatchRegistration(deleteIntent);
 
                 // try again
-                return this.arkProvider.registerIntent(intent);
+                return this.arkProvider.createBatchRegistration(intent);
             }
 
             throw error;
         }
     }
 
-    async makeRegisterIntentSignature(
+    async makeBatchRegistrationProof(
         coins: ExtendedCoin[],
         outputs: TransactionOutput[],
         onchainOutputsIndexes: number[],
@@ -4599,7 +4599,7 @@ export class Wallet
         };
     }
 
-    async makeDeleteIntentSignature(
+    async makeDeleteBatchRegistrationProof(
         coins: ExtendedCoin[],
     ): Promise<SignedProof<Proof.DeleteMessage>> {
         const message: Proof.DeleteMessage = {
@@ -4616,7 +4616,7 @@ export class Wallet
         };
     }
 
-    async makeGetPendingTxIntentSignature(
+    async makeGetPendingTxProof(
         coins: ExtendedVirtualCoin[],
     ): Promise<SignedProof<Proof.GetPendingTxMessage>> {
         const message: Proof.GetPendingTxMessage = {
@@ -4631,6 +4631,26 @@ export class Wallet
             proof: base64.encode(signedProof.toPSBT()),
             message,
         };
+    }
+
+    /** @deprecated Use {@link safeCreateBatchRegistration}. */
+    safeRegisterIntent(...args: Parameters<Wallet["safeCreateBatchRegistration"]>) {
+        return this.safeCreateBatchRegistration(...args);
+    }
+
+    /** @deprecated Use {@link makeBatchRegistrationProof}. */
+    makeRegisterIntentSignature(...args: Parameters<Wallet["makeBatchRegistrationProof"]>) {
+        return this.makeBatchRegistrationProof(...args);
+    }
+
+    /** @deprecated Use {@link makeDeleteBatchRegistrationProof}. */
+    makeDeleteIntentSignature(...args: Parameters<Wallet["makeDeleteBatchRegistrationProof"]>) {
+        return this.makeDeleteBatchRegistrationProof(...args);
+    }
+
+    /** @deprecated Use {@link makeGetPendingTxProof}. */
+    makeGetPendingTxIntentSignature(...args: Parameters<Wallet["makeGetPendingTxProof"]>) {
+        return this.makeGetPendingTxProof(...args);
     }
 
     /**
@@ -4699,7 +4719,7 @@ export class Wallet
                 const batchFinalized: string[] = [];
                 const batchPending: string[] = [];
 
-                const intent = await this.makeGetPendingTxIntentSignature(batch);
+                const intent = await this.makeGetPendingTxProof(batch);
                 const pendingTxs = await this.arkProvider.getPendingTxs(intent);
 
                 for (const pendingTx of pendingTxs) {

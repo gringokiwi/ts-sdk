@@ -96,6 +96,9 @@ export type TreeNoncesEvent = {
 export type BatchStartedEvent = {
     type: SettlementEventType.BatchStarted;
     id: string;
+    /** Hashes of the batch registration ids that join this batch. */
+    registrationIdHashes: string[];
+    /** @deprecated Use {@link registrationIdHashes}. It holds the same value. */
     intentIdHashes: string[];
     batchExpiry: bigint;
 };
@@ -309,11 +312,17 @@ export interface OperatorProvider {
     /** Finalize a previously submitted Arkade transaction. */
     finalizeTx(arkTxid: string, finalCheckpointTxs: string[]): Promise<void>;
 
-    /** Register a signed intent with the Arkade server. */
-    registerIntent(intent: SignedIntent<Intent.RegisterMessage>): Promise<string>;
+    /** Create a batch registration from a signed proof, returning its id. */
+    createBatchRegistration(intent: SignedIntent<Intent.RegisterMessage>): Promise<string>;
 
-    /** Delete a previously registered intent. */
-    deleteIntent(intent: SignedIntent<Intent.DeleteMessage>): Promise<void>;
+    /** @deprecated Use {@link createBatchRegistration}. */
+    registerIntent: ArkProvider["createBatchRegistration"];
+
+    /** Delete a batch registration, authorized by a signed delete proof. */
+    deleteBatchRegistration(intent: SignedIntent<Intent.DeleteMessage>): Promise<void>;
+
+    /** @deprecated Use {@link deleteBatchRegistration}. */
+    deleteIntent: ArkProvider["deleteBatchRegistration"];
 
     /** Confirm an already registered intent id. */
     confirmRegistration(intentId: string): Promise<void>;
@@ -648,7 +657,7 @@ export class RestOperatorProvider implements OperatorProvider {
         );
     }
 
-    async registerIntent(intent: SignedIntent<Intent.RegisterMessage>): Promise<string> {
+    async createBatchRegistration(intent: SignedIntent<Intent.RegisterMessage>): Promise<string> {
         const url = `${this.serverUrl}/v1/batch/registerIntent`;
         const response = await this.postJson(
             url,
@@ -658,14 +667,19 @@ export class RestOperatorProvider implements OperatorProvider {
                     message: Proof.encodeMessage(intent.message),
                 },
             },
-            (errorText) => `Failed to register intent: ${errorText}`,
+            (errorText) => `Failed to create batch registration: ${errorText}`,
         );
 
         const data = await response.json();
         return data.intentId;
     }
 
-    async deleteIntent(intent: SignedIntent<Intent.DeleteMessage>): Promise<void> {
+    /** @deprecated Use {@link createBatchRegistration}. */
+    registerIntent(intent: SignedIntent<Intent.RegisterMessage>): Promise<string> {
+        return this.createBatchRegistration(intent);
+    }
+
+    async deleteBatchRegistration(intent: SignedIntent<Intent.DeleteMessage>): Promise<void> {
         const url = `${this.serverUrl}/v1/batch/deleteIntent`;
         await this.postJson(
             url,
@@ -675,8 +689,13 @@ export class RestOperatorProvider implements OperatorProvider {
                     message: Proof.encodeMessage(intent.message),
                 },
             },
-            (errorText) => `Failed to delete intent: ${errorText}`,
+            (errorText) => `Failed to delete batch registration: ${errorText}`,
         );
+    }
+
+    /** @deprecated Use {@link deleteBatchRegistration}. */
+    deleteIntent(intent: SignedIntent<Intent.DeleteMessage>): Promise<void> {
+        return this.deleteBatchRegistration(intent);
     }
 
     async confirmRegistration(intentId: string): Promise<void> {
@@ -928,6 +947,7 @@ export class RestOperatorProvider implements OperatorProvider {
             return {
                 type: SettlementEventType.BatchStarted,
                 id: data.batchStarted.id,
+                registrationIdHashes: data.batchStarted.intentIdHashes,
                 intentIdHashes: data.batchStarted.intentIdHashes,
                 batchExpiry: BigInt(data.batchStarted.batchExpiry),
             };
