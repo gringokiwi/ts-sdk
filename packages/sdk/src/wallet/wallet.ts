@@ -546,12 +546,12 @@ export function excludeLockedOutpoints<T extends { txid: string; vout: number }>
  */
 export async function spendableVtxosExcludingLocked<T extends { txid: string; vout: number }>(
     vtxos: T[],
-    intentRepository?: Pick<IntentRepository, "getLockedVtxoOutpoints">,
+    batchRegistrationRepository?: Pick<IntentRepository, "getLockedVtxoOutpoints">,
 ): Promise<T[]> {
-    if (!intentRepository) return vtxos;
+    if (!batchRegistrationRepository) return vtxos;
     let locked: Outpoint[];
     try {
-        locked = await intentRepository.getLockedVtxoOutpoints();
+        locked = await batchRegistrationRepository.getLockedVtxoOutpoints();
     } catch (e) {
         console.error("getLockedVtxoOutpoints failed; reporting unfiltered balance", e);
         return vtxos;
@@ -722,8 +722,18 @@ export class ReadonlyWallet implements IReadonlyWallet {
         wallet.vtxoSyncOverlapMs = this.vtxoSyncOverlapMs;
     }
 
-    /** Opt-in intent-lifecycle repository; `undefined` ⇒ intent persistence is a no-op. */
-    public intentRepository?: IntentRepository;
+    /** Opt-in batch registration repository; `undefined` ⇒ persistence is a no-op. */
+    public batchRegistrationRepository?: IntentRepository;
+
+    /** @deprecated Use {@link batchRegistrationRepository}. */
+    get intentRepository(): IntentRepository | undefined {
+        return this.batchRegistrationRepository;
+    }
+
+    set intentRepository(repository: IntentRepository | undefined) {
+        this.batchRegistrationRepository = repository;
+    }
+
     /**
      * **Experimental / inert.** Opt-in virtual-tx repository, exposed so callers can pass it to
      * {@link Unroll.Session.create} as a best-effort raw-tx cache. Normal sync never writes it.
@@ -1214,7 +1224,8 @@ export class ReadonlyWallet implements IReadonlyWallet {
             setup.walletContractTimelocks,
         );
         wallet.vtxoSyncOverlapMs = config.vtxoSyncOverlapMs;
-        wallet.intentRepository = config.storage?.intentRepository;
+        wallet.batchRegistrationRepository =
+            config.storage?.batchRegistrationRepository ?? config.storage?.intentRepository;
         wallet.lazyInitialization = config.lazyInitialization ?? false;
         wallet.virtualTxRepository = config.storage?.virtualTxRepository;
         wallet.exitDataCapture = config.storage?.exitDataCapture;
@@ -1352,7 +1363,10 @@ export class ReadonlyWallet implements IReadonlyWallet {
                 !pendingRecovery.has(`${vtxo.txid}:${vtxo.vout}`) &&
                 !this._heldOutpoints.has(`${vtxo.txid}:${vtxo.vout}`),
         );
-        const unlocked = await spendableVtxosExcludingLocked(selectable, this.intentRepository);
+        const unlocked = await spendableVtxosExcludingLocked(
+            selectable,
+            this.batchRegistrationRepository,
+        );
         logExcludedVtxos("getSpendableVtxos", vtxos, [
             gateExclusion(gated),
             outpointExclusion(pendingRecovery, PENDING_RECOVERY_REASON),
@@ -1436,9 +1450,9 @@ export class ReadonlyWallet implements IReadonlyWallet {
 
     /** The intent store's lock set. Fails open, like every other read of it. */
     private async lockedOutpoints(): Promise<Set<string>> {
-        if (!this.intentRepository) return new Set();
+        if (!this.batchRegistrationRepository) return new Set();
         try {
-            const locked = await this.intentRepository.getLockedVtxoOutpoints();
+            const locked = await this.batchRegistrationRepository.getLockedVtxoOutpoints();
             return new Set(locked.map((o) => `${o.txid}:${o.vout}`));
         } catch {
             return new Set();
@@ -1504,7 +1518,7 @@ export class ReadonlyWallet implements IReadonlyWallet {
         const { gated, pendingRecovery } = this.spendabilityView(snapshot);
         // Offline-first and fails open — see {@link spendableVtxosExcludingLocked}.
         const unlocked = new Set(
-            (await spendableVtxosExcludingLocked([...vtxos], this.intentRepository)).map(
+            (await spendableVtxosExcludingLocked([...vtxos], this.batchRegistrationRepository)).map(
                 (vtxo) => `${vtxo.txid}:${vtxo.vout}`,
             ),
         );
@@ -1602,7 +1616,7 @@ export class ReadonlyWallet implements IReadonlyWallet {
     }
 
     private async clearIntents(): Promise<void> {
-        const intentRepository = this.intentRepository;
+        const intentRepository = this.batchRegistrationRepository;
         if (!intentRepository) return;
         const released = await releaseIntents({
             ...this.intentReconciliationConfig(),
@@ -2228,7 +2242,7 @@ export class ReadonlyWallet implements IReadonlyWallet {
             indexerProvider: this.indexerProvider,
             contractRepository: this.contractRepository,
             walletRepository: this.walletRepository,
-            intentRepository: this.intentRepository,
+            batchRegistrationRepository: this.batchRegistrationRepository,
             intentReconciliation: this.intentReconciliationConfig(),
             onVtxosPersisted,
             onVtxosSpent,
@@ -3629,7 +3643,8 @@ export class Wallet
         }
 
         wallet.vtxoSyncOverlapMs = config.vtxoSyncOverlapMs;
-        wallet.intentRepository = config.storage?.intentRepository;
+        wallet.batchRegistrationRepository =
+            config.storage?.batchRegistrationRepository ?? config.storage?.intentRepository;
         wallet.virtualTxRepository = config.storage?.virtualTxRepository;
         wallet.exitDataCapture = config.storage?.exitDataCapture;
         wallet._concurrentSpending = config.concurrentSpending === true;
@@ -4052,7 +4067,7 @@ export class Wallet
             // the caller's eventCallback stays purely observational.
             const handler = wrapHandlerWithIntentPersistence(
                 this.createBatchHandler(intentId, params.inputs, recipients, session),
-                { intentRepository: this.intentRepository, intentTxId },
+                { intentRepository: this.batchRegistrationRepository, intentTxId },
             );
 
             const commitmentTxid = await Batch.join(primedStream, handler, {
@@ -4490,7 +4505,7 @@ export class Wallet
     }
 
     /**
-     * Best-effort upsert into {@link intentRepository}; never throws into the settle path.
+     * Best-effort upsert into {@link batchRegistrationRepository}; never throws into the settle path.
      * Preserves fields the event reducer already wrote.
      */
     private async persistIntentSnapshot(
@@ -4501,7 +4516,7 @@ export class Wallet
         inputs: ExtendedCoin[],
         patch?: Partial<ArkIntent>,
     ): Promise<void> {
-        const repo = this.intentRepository;
+        const repo = this.batchRegistrationRepository;
         if (!repo) return;
         try {
             const now = Date.now();
