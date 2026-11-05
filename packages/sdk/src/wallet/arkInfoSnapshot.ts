@@ -9,11 +9,14 @@ import { updateWalletState } from "../utils/syncCursors";
  * snapshot. Namespaced so it coexists with unrelated settings keys
  * (`hasPendingTx`, `vtxoCursorMigrated`, …).
  *
- * The string is PERSISTED. Renaming the surrounding `ArkInfo*` symbols to
- * `Arkade*` must leave this value alone — changing it orphans every cached
- * snapshot already on disk and silently forces a live-only boot.
+ * The string is PERSISTED. Changing it orphans every cached snapshot already
+ * on disk and silently forces a live-only boot, unless the old key stays
+ * readable as {@link LEGACY_SNAPSHOT_KEY} does.
  */
-export const ARK_INFO_SNAPSHOT_KEY = "arkInfoSnapshot";
+export const OPERATOR_INFO_SNAPSHOT_KEY = "operatorInfoSnapshot";
+
+/** Holds a version 1 snapshot until the next save removes it. */
+const LEGACY_SNAPSHOT_KEY = "arkInfoSnapshot";
 
 /**
  * A JSON-safe, versioned cache of the operator's {@link ArkadeInfo} metadata,
@@ -30,10 +33,10 @@ export const ARK_INFO_SNAPSHOT_KEY = "arkInfoSnapshot";
  * construction metadata) and is rehydrated as `{}`.
  */
 export type StoredArkInfoSnapshot = {
-    version: 1;
+    version: 2;
     savedAt: number;
-    source: "arkade.getInfo";
-    arkInfo: {
+    source: "operator.getInfo";
+    operatorInfo: {
         network: string;
         signerPubkey: string;
         checkpointTapscript: string;
@@ -80,15 +83,23 @@ export class MalformedArkInfoSnapshotError extends Error {
     }
 }
 
-const CURRENT_VERSION = 1 as const;
+const CURRENT_VERSION = 2 as const;
+const SOURCE = "operator.getInfo" as const;
+
+/** Version 1 held the same fields under `arkInfo`, with its own source tag. */
+function upgradeVersion1(snap: Record<string, unknown>): Record<string, unknown> {
+    if (snap.version !== 1 || snap.source !== "arkade.getInfo") return snap;
+    const { arkInfo, ...rest } = snap;
+    return { ...rest, version: CURRENT_VERSION, source: SOURCE, operatorInfo: arkInfo };
+}
 
 /** Convert a live {@link ArkadeInfo} into its JSON-safe snapshot form. */
 export function serializeArkInfoSnapshot(info: ArkadeInfo, savedAt: number): StoredArkInfoSnapshot {
     return {
         version: CURRENT_VERSION,
         savedAt,
-        source: "arkade.getInfo",
-        arkInfo: {
+        source: SOURCE,
+        operatorInfo: {
             network: info.network,
             signerPubkey: info.signerPubkey,
             checkpointTapscript: info.checkpointTapscript,
@@ -131,7 +142,7 @@ export function serializeArkInfoSnapshot(info: ArkadeInfo, savedAt: number): Sto
  * {@link StoredArkInfoSnapshot}).
  */
 export function hydrateArkInfo(snapshot: StoredArkInfoSnapshot): ArkadeInfo {
-    const a = snapshot.arkInfo;
+    const a = snapshot.operatorInfo;
     return {
         boardingExitDelay: BigInt(a.boardingExitDelay),
         checkpointTapscript: a.checkpointTapscript,
@@ -204,7 +215,7 @@ export function parseStoredArkInfoSnapshot(raw: unknown): StoredArkInfoSnapshot 
     if (typeof raw !== "object" || raw === null) {
         throw new MalformedArkInfoSnapshotError("snapshot must be an object");
     }
-    const snap = raw as Record<string, unknown>;
+    const snap = upgradeVersion1(raw as Record<string, unknown>);
     if (snap.version !== CURRENT_VERSION) {
         throw new MalformedArkInfoSnapshotError(
             `unsupported snapshot version: ${String(snap.version)}`,
@@ -213,13 +224,13 @@ export function parseStoredArkInfoSnapshot(raw: unknown): StoredArkInfoSnapshot 
     if (typeof snap.savedAt !== "number") {
         throw new MalformedArkInfoSnapshotError("savedAt must be a number");
     }
-    if (snap.source !== "arkade.getInfo") {
+    if (snap.source !== SOURCE) {
         throw new MalformedArkInfoSnapshotError(`unexpected source: ${String(snap.source)}`);
     }
-    if (typeof snap.arkInfo !== "object" || snap.arkInfo === null) {
-        throw new MalformedArkInfoSnapshotError("arkInfo must be an object");
+    if (typeof snap.operatorInfo !== "object" || snap.operatorInfo === null) {
+        throw new MalformedArkInfoSnapshotError("operatorInfo must be an object");
     }
-    const a = snap.arkInfo as Record<string, unknown>;
+    const a = snap.operatorInfo as Record<string, unknown>;
 
     for (const field of [
         "network",
@@ -230,7 +241,7 @@ export function parseStoredArkInfoSnapshot(raw: unknown): StoredArkInfoSnapshot 
         "digest",
         "version",
     ]) {
-        assertString(a[field], `arkInfo.${field}`);
+        assertString(a[field], `operatorInfo.${field}`);
     }
     for (const field of [
         "unilateralExitDelay",
@@ -242,41 +253,43 @@ export function parseStoredArkInfoSnapshot(raw: unknown): StoredArkInfoSnapshot 
         "utxoMinAmount",
         "utxoMaxAmount",
     ]) {
-        assertDecimalString(a[field], `arkInfo.${field}`);
+        assertDecimalString(a[field], `operatorInfo.${field}`);
     }
     for (const field of ["vtxoTreeExpiry", "maxTxWeight", "maxOpReturnOutputs"]) {
         if (a[field] !== undefined) {
-            assertDecimalString(a[field], `arkInfo.${field}`);
+            assertDecimalString(a[field], `operatorInfo.${field}`);
         }
     }
-    assertFeeInfo(a.fees, "arkInfo.fees");
+    assertFeeInfo(a.fees, "operatorInfo.fees");
 
     if (!Array.isArray(a.deprecatedSigners)) {
-        throw new MalformedArkInfoSnapshotError("arkInfo.deprecatedSigners must be an array");
+        throw new MalformedArkInfoSnapshotError("operatorInfo.deprecatedSigners must be an array");
     }
     a.deprecatedSigners.forEach((s: unknown, i: number) => {
         if (typeof s !== "object" || s === null) {
             throw new MalformedArkInfoSnapshotError(
-                `arkInfo.deprecatedSigners[${i}] must be an object`,
+                `operatorInfo.deprecatedSigners[${i}] must be an object`,
             );
         }
         const signer = s as Record<string, unknown>;
-        assertString(signer.pubkey, `arkInfo.deprecatedSigners[${i}].pubkey`);
-        assertDecimalString(signer.cutoffDate, `arkInfo.deprecatedSigners[${i}].cutoffDate`);
+        assertString(signer.pubkey, `operatorInfo.deprecatedSigners[${i}].pubkey`);
+        assertDecimalString(signer.cutoffDate, `operatorInfo.deprecatedSigners[${i}].cutoffDate`);
     });
 
     if (a.scheduledSession !== undefined) {
         if (typeof a.scheduledSession !== "object" || a.scheduledSession === null) {
-            throw new MalformedArkInfoSnapshotError("arkInfo.scheduledSession must be an object");
+            throw new MalformedArkInfoSnapshotError(
+                "operatorInfo.scheduledSession must be an object",
+            );
         }
         const s = a.scheduledSession as Record<string, unknown>;
         for (const field of ["duration", "nextEndTime", "nextStartTime", "period"]) {
-            assertDecimalString(s[field], `arkInfo.scheduledSession.${field}`);
+            assertDecimalString(s[field], `operatorInfo.scheduledSession.${field}`);
         }
-        assertFeeInfo(s.fees, "arkInfo.scheduledSession.fees");
+        assertFeeInfo(s.fees, "operatorInfo.scheduledSession.fees");
     }
 
-    return raw as StoredArkInfoSnapshot;
+    return snap as unknown as StoredArkInfoSnapshot;
 }
 
 /**
@@ -288,7 +301,8 @@ export async function loadArkInfoSnapshot(
     repo: WalletRepository,
 ): Promise<StoredArkInfoSnapshot | null> {
     const state = await repo.getWalletState();
-    const raw = state?.settings?.[ARK_INFO_SNAPSHOT_KEY];
+    const settings = state?.settings;
+    const raw = settings?.[OPERATOR_INFO_SNAPSHOT_KEY] ?? settings?.[LEGACY_SNAPSHOT_KEY];
     if (raw === undefined || raw === null) return null;
     return parseStoredArkInfoSnapshot(raw);
 }
@@ -305,13 +319,10 @@ export async function saveArkInfoSnapshot(
     savedAt: number,
 ): Promise<void> {
     const snapshot = serializeArkInfoSnapshot(info, savedAt);
-    await updateWalletState(repo, (state) => ({
-        ...state,
-        settings: {
-            ...(state.settings ?? {}),
-            [ARK_INFO_SNAPSHOT_KEY]: snapshot,
-        },
-    }));
+    await updateWalletState(repo, (state) => {
+        const { [LEGACY_SNAPSHOT_KEY]: _legacy, ...settings } = state.settings ?? {};
+        return { ...state, settings: { ...settings, [OPERATOR_INFO_SNAPSHOT_KEY]: snapshot } };
+    });
 }
 
 /** Where the {@link ArkadeInfo} used to construct a wallet came from. */
@@ -364,7 +375,7 @@ export async function resolveArkInfo(
         const snapshot = await loadArkInfoSnapshot(walletRepository);
         if (!snapshot) {
             throw new ProviderUnavailableError(
-                "Arkade server info is unavailable and no cached snapshot exists",
+                "Operator info is unavailable and no cached snapshot exists",
                 { cause: err },
             );
         }
@@ -388,6 +399,6 @@ export async function saveValidatedArkInfoSnapshot(
     try {
         await saveArkInfoSnapshot(repo, info, savedAt);
     } catch (err) {
-        console.warn("Failed to persist Ark info snapshot", err);
+        console.warn("Failed to persist operator info snapshot", err);
     }
 }

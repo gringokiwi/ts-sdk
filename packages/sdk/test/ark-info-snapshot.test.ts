@@ -18,7 +18,7 @@ import { FetchError } from "../src/utils/fetch";
 import { ReadonlySingleKey } from "../src/identity/singleKey";
 import { SingleKey } from "../src/identity/singleKey";
 import {
-    ARK_INFO_SNAPSHOT_KEY,
+    OPERATOR_INFO_SNAPSHOT_KEY,
     MalformedArkInfoSnapshotError,
     hydrateArkInfo,
     loadArkInfoSnapshot,
@@ -77,13 +77,13 @@ describe("serializeArkInfoSnapshot / hydrateArkInfo", () => {
         const snapshot = serializeArkInfoSnapshot(makeArkInfo(), 111);
         expect(() => JSON.stringify(snapshot)).not.toThrow();
         // bigints are stringified
-        expect(snapshot.arkInfo.unilateralExitDelay).toBe("144");
-        expect(snapshot.arkInfo.utxoMaxAmount).toBe("-1");
-        expect(snapshot.arkInfo.deprecatedSigners[0].cutoffDate).toBe("1700000000");
-        expect(snapshot.arkInfo.scheduledSession?.period).toBe("30");
-        expect(snapshot.version).toBe(1);
+        expect(snapshot.operatorInfo.unilateralExitDelay).toBe("144");
+        expect(snapshot.operatorInfo.utxoMaxAmount).toBe("-1");
+        expect(snapshot.operatorInfo.deprecatedSigners[0].cutoffDate).toBe("1700000000");
+        expect(snapshot.operatorInfo.scheduledSession?.period).toBe("30");
+        expect(snapshot.version).toBe(2);
         expect(snapshot.savedAt).toBe(111);
-        expect(snapshot.source).toBe("arkade.getInfo");
+        expect(snapshot.source).toBe("operator.getInfo");
     });
 
     it("round-trips when scheduledSession is absent", () => {
@@ -96,19 +96,19 @@ describe("serializeArkInfoSnapshot / hydrateArkInfo", () => {
     it("round-trips vtxoTreeExpiry when advertised", () => {
         const info = makeArkInfo({ vtxoTreeExpiry: 604_672n });
         const snapshot = serializeArkInfoSnapshot(info, 1);
-        expect(snapshot.arkInfo.vtxoTreeExpiry).toBe("604672");
+        expect(snapshot.operatorInfo.vtxoTreeExpiry).toBe("604672");
         expect(hydrateArkInfo(snapshot).vtxoTreeExpiry).toBe(604_672n);
     });
 
     it("keeps vtxoTreeExpiry undefined when not advertised — never 0n", () => {
         const snapshot = serializeArkInfoSnapshot(makeArkInfo(), 1);
-        expect(snapshot.arkInfo.vtxoTreeExpiry).toBeUndefined();
+        expect(snapshot.operatorInfo.vtxoTreeExpiry).toBeUndefined();
         expect(hydrateArkInfo(snapshot).vtxoTreeExpiry).toBeUndefined();
     });
 
     it("accepts a v1 snapshot written before vtxoTreeExpiry existed", () => {
         const raw = JSON.parse(JSON.stringify(serializeArkInfoSnapshot(makeArkInfo(), 1)));
-        delete raw.arkInfo.vtxoTreeExpiry;
+        delete raw.operatorInfo.vtxoTreeExpiry;
         expect(() => parseStoredArkInfoSnapshot(raw)).not.toThrow();
         expect(hydrateArkInfo(parseStoredArkInfoSnapshot(raw)).vtxoTreeExpiry).toBeUndefined();
     });
@@ -116,8 +116,8 @@ describe("serializeArkInfoSnapshot / hydrateArkInfo", () => {
     it("round-trips the transaction limits when advertised", () => {
         const info = makeArkInfo({ maxTxWeight: 40_000n, maxOpReturnOutputs: 3n });
         const snapshot = serializeArkInfoSnapshot(info, 1);
-        expect(snapshot.arkInfo.maxTxWeight).toBe("40000");
-        expect(snapshot.arkInfo.maxOpReturnOutputs).toBe("3");
+        expect(snapshot.operatorInfo.maxTxWeight).toBe("40000");
+        expect(snapshot.operatorInfo.maxOpReturnOutputs).toBe("3");
         expect(hydrateArkInfo(snapshot)).toEqual({ ...info, serviceStatus: {} });
     });
 
@@ -138,8 +138,8 @@ describe("serializeArkInfoSnapshot / hydrateArkInfo", () => {
                 ),
             ),
         );
-        delete raw.arkInfo.maxTxWeight;
-        delete raw.arkInfo.maxOpReturnOutputs;
+        delete raw.operatorInfo.maxTxWeight;
+        delete raw.operatorInfo.maxOpReturnOutputs;
         const hydrated = hydrateArkInfo(parseStoredArkInfoSnapshot(raw));
         expect(hydrated.maxTxWeight).toBeUndefined();
         expect(hydrated.maxOpReturnOutputs).toBeUndefined();
@@ -154,34 +154,34 @@ describe("parseStoredArkInfoSnapshot", () => {
 
     it.each([
         ["non-object", 42],
-        ["wrong version", { version: 2 }],
-        ["missing savedAt", { version: 1, source: "arkade.getInfo", arkInfo: {} }],
-        ["wrong source", { version: 1, savedAt: 1, source: "x", arkInfo: {} }],
+        ["wrong version", { version: 3 }],
+        ["missing savedAt", { version: 2, source: "operator.getInfo", operatorInfo: {} }],
+        ["wrong source", { version: 2, savedAt: 1, source: "x", operatorInfo: {} }],
     ])("rejects %s", (_label, raw) => {
         expect(() => parseStoredArkInfoSnapshot(raw)).toThrow(MalformedArkInfoSnapshotError);
     });
 
     it("rejects a non-decimal bigint field", () => {
         const snapshot = serializeArkInfoSnapshot(makeArkInfo(), 1);
-        (snapshot.arkInfo as any).dust = "not-a-number";
+        (snapshot.operatorInfo as any).dust = "not-a-number";
         expect(() => parseStoredArkInfoSnapshot(snapshot)).toThrow(MalformedArkInfoSnapshotError);
     });
 
     it("rejects a missing string field", () => {
         const snapshot = serializeArkInfoSnapshot(makeArkInfo(), 1);
-        delete (snapshot.arkInfo as any).signerPubkey;
+        delete (snapshot.operatorInfo as any).signerPubkey;
         expect(() => parseStoredArkInfoSnapshot(snapshot)).toThrow(MalformedArkInfoSnapshotError);
     });
 
     it("rejects a malformed deprecatedSigners entry", () => {
         const snapshot = serializeArkInfoSnapshot(makeArkInfo(), 1);
-        (snapshot.arkInfo as any).deprecatedSigners = [{ pubkey: "02ab" }];
+        (snapshot.operatorInfo as any).deprecatedSigners = [{ pubkey: "02ab" }];
         expect(() => parseStoredArkInfoSnapshot(snapshot)).toThrow(MalformedArkInfoSnapshotError);
     });
 
     it("rejects a malformed scheduledSession", () => {
         const snapshot = serializeArkInfoSnapshot(makeArkInfo(), 1);
-        (snapshot.arkInfo.scheduledSession as any).period = 30; // number, not decimal string
+        (snapshot.operatorInfo.scheduledSession as any).period = 30; // number, not decimal string
         expect(() => parseStoredArkInfoSnapshot(snapshot)).toThrow(MalformedArkInfoSnapshotError);
     });
 });
@@ -207,12 +207,44 @@ describe("loadArkInfoSnapshot / saveArkInfoSnapshot", () => {
         const state = await repo.getWalletState();
         expect(state?.settings?.hasPendingTx).toBe(true);
         expect(state?.lastSyncTime).toBe(42);
-        expect(state?.settings?.[ARK_INFO_SNAPSHOT_KEY]).toBeDefined();
+        expect(state?.settings?.[OPERATOR_INFO_SNAPSHOT_KEY]).toBeDefined();
+    });
+
+    const version1 = (info: ArkadeInfo, savedAt: number) => {
+        const { operatorInfo, ...rest } = serializeArkInfoSnapshot(info, savedAt);
+        return { ...rest, version: 1, source: "arkade.getInfo", arkInfo: operatorInfo };
+    };
+
+    it("persists under a fixed key", () => {
+        expect(OPERATOR_INFO_SNAPSHOT_KEY).toBe("operatorInfoSnapshot");
+    });
+
+    it("reads a version 1 snapshot from the old key", async () => {
+        const repo = new InMemoryWalletRepository();
+        const info = makeArkInfo();
+        await repo.saveWalletState({ settings: { arkInfoSnapshot: version1(info, 7) } });
+        expect(await loadArkInfoSnapshot(repo)).toEqual(serializeArkInfoSnapshot(info, 7));
+    });
+
+    it("moves a version 1 snapshot to the new key on save", async () => {
+        const repo = new InMemoryWalletRepository();
+        await repo.saveWalletState({ settings: { arkInfoSnapshot: version1(makeArkInfo(), 7) } });
+        await saveArkInfoSnapshot(repo, makeArkInfo(), 8);
+        const settings = (await repo.getWalletState())?.settings;
+        expect(settings?.arkInfoSnapshot).toBeUndefined();
+        expect(settings?.[OPERATOR_INFO_SNAPSHOT_KEY].savedAt).toBe(8);
+    });
+
+    it("rejects a version 1 snapshot with another source", async () => {
+        const repo = new InMemoryWalletRepository();
+        const arkInfoSnapshot = { ...version1(makeArkInfo(), 7), source: "x" };
+        await repo.saveWalletState({ settings: { arkInfoSnapshot } });
+        await expect(loadArkInfoSnapshot(repo)).rejects.toThrow(MalformedArkInfoSnapshotError);
     });
 
     it("throws terminally when the stored snapshot is malformed", async () => {
         const repo = new InMemoryWalletRepository();
-        await repo.saveWalletState({ settings: { [ARK_INFO_SNAPSHOT_KEY]: { version: 2 } } });
+        await repo.saveWalletState({ settings: { [OPERATOR_INFO_SNAPSHOT_KEY]: { version: 3 } } });
         await expect(loadArkInfoSnapshot(repo)).rejects.toThrow(MalformedArkInfoSnapshotError);
     });
 });
@@ -270,7 +302,7 @@ describe("resolveArkInfo", () => {
 
     it("surfaces a malformed cache as terminal on retryable failure", async () => {
         const repo = new InMemoryWalletRepository();
-        await repo.saveWalletState({ settings: { [ARK_INFO_SNAPSHOT_KEY]: { version: 9 } } });
+        await repo.saveWalletState({ settings: { [OPERATOR_INFO_SNAPSHOT_KEY]: { version: 9 } } });
         await expect(
             resolveArkInfo(failing(new ProviderUnavailableError("503")), repo),
         ).rejects.toThrow(MalformedArkInfoSnapshotError);
