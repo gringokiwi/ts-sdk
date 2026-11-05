@@ -203,7 +203,7 @@ export interface ArkadeInfo {
      */
     vtxoTreeExpiry?: bigint;
     /**
-     * Weight budget an ark transaction must stay under; the server answers
+     * Weight budget a transaction must stay under; the operator answers
      * `TX_TOO_LARGE` past it.
      *
      * `undefined` when not advertised — a server that omits the field and one
@@ -298,7 +298,7 @@ export interface OperatorProvider {
 
     /** Submit a signed Arkade transaction and its checkpoint transactions. */
     submitTx(
-        signedArkTx: string,
+        signedTx: string,
         checkpointTxs: string[],
     ): Promise<{
         arkTxid: string;
@@ -608,7 +608,7 @@ export class RestOperatorProvider implements OperatorProvider {
     }
 
     async submitTx(
-        signedArkTx: string,
+        signedTx: string,
         checkpointTxs: string[],
     ): Promise<{
         arkTxid: string;
@@ -619,7 +619,7 @@ export class RestOperatorProvider implements OperatorProvider {
         const response = await this.postJson(
             url,
             {
-                signedArkTx,
+                signedArkTx: signedTx,
                 checkpointTxs,
             },
             (errorText) => `Failed to submit virtual transaction: ${errorText}`,

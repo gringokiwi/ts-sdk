@@ -77,8 +77,8 @@ export class CachingOperatorProvider implements OperatorProvider {
         return this.inflight;
     }
 
-    submitTx(signedArkTx: string, checkpointTxs: string[]) {
-        return this.inner.submitTx(signedArkTx, checkpointTxs);
+    submitTx(signedTx: string, checkpointTxs: string[]) {
+        return this.inner.submitTx(signedTx, checkpointTxs);
     }
 
     finalizeTx(arkTxid: string, finalCheckpointTxs: string[]) {

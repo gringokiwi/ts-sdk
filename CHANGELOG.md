@@ -249,6 +249,10 @@ style and have not been backfilled.
   boarding coins; it now throws `WalletNotInitializedError`, like
   `GET_VTXOS`. (#943)
 
+- **SDK error messages say "transaction" instead of "ark tx".** Code that matched
+  text such as `submitTx returned ark txid` must update. Wire keys such as
+  `signedArkTx` do not change.
+
 ### Bug Fixes
 
 - **A failed contract-manager start-up no longer leaves its watcher running.**
