@@ -426,7 +426,7 @@ import {
     assertSendDeadline,
     captureSendDeadline,
 } from "./wallet/sendDeadline";
-import type { ServerInfoSource } from "./wallet/arkInfoSnapshot";
+import type { OperatorInfoSource, ServerInfoSource } from "./wallet/arkInfoSnapshot";
 import type { ProviderConnectionState } from "./wallet/wallet";
 import type { ContractSyncState } from "./contracts/contractManager";
 import { validateVtxoTxGraph, validateConnectorsTxGraph } from "./tree/validation";
@@ -1051,6 +1051,7 @@ export type {
     SignerSet,
     // Provider availability
     ProviderKind,
+    OperatorInfoSource,
     ServerInfoSource,
     ProviderConnectionState,
     ContractSyncState,
