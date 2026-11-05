@@ -57,7 +57,7 @@ import {
     ArkTransaction,
     ArkadeBroadcaster,
     ArkadeReader,
-    GetArkadeInfoOptions,
+    GetOperatorInfoOptions,
     Asset,
     Coin,
     ExtendedCoin,
@@ -768,7 +768,7 @@ export class ReadonlyWallet implements IReadonlyWallet {
 
     /**
      * Whether the LATEST server-info resolution was live or fell back to the cached snapshot.
-     * Updated on every {@link getArkadeInfo} read so recovery (or a fresh fallback) is reflected.
+     * Updated on every {@link getOperatorInfo} read so recovery (or a fresh fallback) is reflected.
      */
     protected _serverInfoSource: ServerInfoSource = "live";
 
@@ -950,7 +950,7 @@ export class ReadonlyWallet implements IReadonlyWallet {
      * @returns The Arkade server's info
      * @see ArkadeInfo
      */
-    async getArkadeInfo(opts?: GetArkadeInfoOptions): Promise<ArkadeInfo> {
+    async getOperatorInfo(opts?: GetOperatorInfoOptions): Promise<ArkadeInfo> {
         const { info, source, lastOnlineAt } = await resolveArkInfo(
             this.arkProvider,
             this.walletRepository,
@@ -964,6 +964,11 @@ export class ReadonlyWallet implements IReadonlyWallet {
             this._serverInfoLastOnlineAt = lastOnlineAt;
         }
         return info;
+    }
+
+    /** @deprecated Use {@link getOperatorInfo}. */
+    getArkadeInfo(opts?: GetOperatorInfoOptions): Promise<ArkadeInfo> {
+        return this.getOperatorInfo(opts);
     }
 
     /**
