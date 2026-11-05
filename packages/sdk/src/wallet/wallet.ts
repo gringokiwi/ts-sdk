@@ -143,7 +143,7 @@ import {
     pruneExitBranches,
 } from "./exit/capture";
 import { createExitChainResolver, ExitDataSource } from "./exit/resolver";
-import { ArkError, ProviderUnavailableError, type ProviderKind } from "../providers/errors";
+import { OperatorError, ProviderUnavailableError, type ProviderKind } from "../providers/errors";
 import { isRetryableProviderError } from "../providers/availability";
 import {
     resolveArkInfo,
@@ -4558,7 +4558,7 @@ export class Wallet
         } catch (error) {
             // catch the "already registered by another intent" error
             if (
-                error instanceof ArkError &&
+                error instanceof OperatorError &&
                 error.code === 0 &&
                 error.message.includes("duplicated input")
             ) {
